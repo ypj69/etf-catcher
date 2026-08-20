@@ -1,0 +1,7 @@
+interface:
+  display_name: "ETF捕手"
+  short_description: "安装、更新、诊断并解读本地ETF资金流与宏观面板"
+  brand_color: "#0F6B53"
+  default_prompt: "Use $etf-catcher to check my local dashboard status and explain the latest available ETF flow data."
+policy:
+  allow_implicit_invocation: true

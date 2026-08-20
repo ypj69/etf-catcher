@@ -1,0 +1,3 @@
+.etf-detail-mode .index-panel{position:relative;top:auto;z-index:auto;box-shadow:var(--shadow)}
+.heatmap-panel .panel-head{display:grid;grid-template-columns:minmax(180px,1fr) auto auto;gap:16px;align-items:center}.heatmap-panel .heat-meaning{margin:0}.heatmap-panel .tabs{justify-self:end}.heatmap-panel #heatmapChart{width:100%;overflow:hidden}
+@media(max-width:760px){.heatmap-panel .panel-head{grid-template-columns:1fr auto}.heatmap-panel .heat-meaning{grid-column:1/-1;grid-row:2;display:flex}.heatmap-panel #heatmapChart{overflow-x:auto}.heatmap-panel .heat-meaning i{width:52px}}

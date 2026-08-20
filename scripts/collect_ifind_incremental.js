@@ -1,0 +1,81 @@
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function parseArgs(argv) {
+  const result = {};
+  for (let i = 2; i < argv.length; i += 2) result[argv[i].replace(/^--/, '')] = argv[i + 1];
+  return result;
+}
+
+function hasTableRows(answer) {
+  const lines = String(answer || '').split(String.fromCharCode(10)).filter((line) => line.trim().startsWith('|'));
+  return lines.length >= 3 && !/查询结果为空/.test(String(answer || ''));
+}
+
+function answerOf(result) {
+  return (result?.data?.result?.content || []).map((item) => {
+    try {
+      const outer = JSON.parse(item.text || '{}');
+      const inner = typeof outer.data === 'string' ? JSON.parse(outer.data) : outer.data;
+      return inner?.answer || item.text || '';
+    } catch (_) {
+      return item.text || '';
+    }
+  }).join('\n');
+}
+
+async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.jobs || !args.output) throw new Error('Required: --jobs and --output');
+  const concurrency = Math.max(1, Math.min(2, Number(args.concurrency || 2)));
+  const tool = args.tool || 'get_fund_market_performance';
+  const maxAttempts = Math.max(1, Math.min(5, Number(args.attempts || 3)));
+  const skillDir = process.env.IFIND_SKILL_DIR || path.join(os.homedir(), '.codex', 'skills', 'ifind-finance-data');
+  const { call } = require(path.join(skillDir, 'call-node.js'));
+  const jobs = JSON.parse(fs.readFileSync(path.resolve(args.jobs), 'utf8'));
+  const output = path.resolve(args.output);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  const completed = new Set();
+  if (fs.existsSync(output)) {
+    for (const line of fs.readFileSync(output, 'utf8').split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const prior = JSON.parse(line);
+        if (prior.status === 'success' && hasTableRows(prior.answer)) completed.add(prior.job_id);
+      } catch (_) {}
+    }
+  }
+  const queue = jobs.filter((job) => !completed.has(job.job_id));
+  let next = 0;
+  let done = completed.size;
+  async function worker(workerId) {
+    while (true) {
+      const index = next++;
+      if (index >= queue.length) return;
+      const job = queue[index];
+      const startedAt = new Date().toISOString();
+      let record;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const result = await call('fund', tool, { query: job.query });
+          const answer = answerOf(result);
+          const status = hasTableRows(answer) ? 'success' : 'empty';
+          record = { ...job, tool, attempt, answer, result, started_at: startedAt, finished_at: new Date().toISOString(), status };
+          if (status === 'success') break;
+        } catch (error) {
+          record = { ...job, tool, attempt, error: String(error?.stack || error), started_at: startedAt, finished_at: new Date().toISOString(), status: 'error' };
+        }
+      }
+      fs.appendFileSync(output, JSON.stringify(record) + '\n', 'utf8');
+      done += 1;
+      if (done % 10 === 0 || done === jobs.length) console.log(JSON.stringify({ worker: workerId, done, total: jobs.length }));
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, (_, i) => worker(i + 1)));
+  console.log(JSON.stringify({ done, total: jobs.length, tool, output }));
+}
+
+main().catch((error) => { console.error(error); process.exit(1); });

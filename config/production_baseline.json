@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "baseline_id": "etf-catcher-public-1.0.0",
+  "frontend_entry": "frontend/index_v2.html",
+  "server_entry": "backend/server.py",
+  "daily_entry": "update.ps1",
+  "web_entry": "start.ps1",
+  "url": "http://127.0.0.1:8766"
+}

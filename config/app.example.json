@@ -1,0 +1,7 @@
+{
+  "host": "127.0.0.1",
+  "port": 8766,
+  "daily_time": "08:30",
+  "notifications_enabled": false,
+  "ifind_skill_dir": ""
+}

@@ -1,0 +1,16 @@
+.venv/
+config/app.local.json
+config/secrets.local.dpapi
+data/*.sqlite3
+data/*.sqlite3-*
+data/web/*.json
+dist/*
+!dist/.gitkeep
+logs/*
+!logs/.gitkeep
+runtime/*
+!runtime/.gitkeep
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log

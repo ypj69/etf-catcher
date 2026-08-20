@@ -1,0 +1,11 @@
+.monitor-layout{grid-template-columns:260px minmax(0,1fr)}
+.detail-panel{min-width:0;overflow:hidden}
+.detail-panel .chart{width:100%;min-width:0}
+.radar-grid{align-items:start}
+.radar-grid>.panel{align-self:start;min-width:0;margin-bottom:0}
+.radar-table-wrap{max-height:440px;height:auto}
+#stableFundBehaviorChart{width:100%;min-width:0}
+.heatmap-panel{min-width:0;overflow:hidden}
+.heatmap-panel #heatmapChart{display:block;width:100%!important;min-width:0!important;max-width:100%;overflow:hidden!important}
+@media(max-width:1000px){.radar-grid{grid-template-columns:1fr}}
+@media(max-width:900px){.monitor-layout{grid-template-columns:1fr}.heatmap-panel{overflow:visible}}
