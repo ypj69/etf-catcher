@@ -50,7 +50,7 @@ def test_single_server_entry_and_public_baseline() -> None:
     assert sorted(path.name for path in (ROOT / "backend").glob("server*.py")) == ["server.py"]
     baseline = json.loads((ROOT / "config" / "production_baseline.json").read_text(encoding="utf-8"))
     assert baseline["server_entry"] == "backend/server.py"
-    assert baseline["baseline_id"] == "etf-catcher-public-1.0.0"
+    assert baseline["baseline_id"] == "etf-catcher-public-1.0.1"
 
 
 def test_local_skill_and_schedule_floor() -> None:
@@ -72,8 +72,8 @@ def test_previous_complete_trading_day_is_disclosed() -> None:
 
 def test_target_date_uses_ifind_sessions_and_fails_closed() -> None:
     resolver = (ROOT / "scripts" / "resolve_target_market_date.py").read_text(encoding="utf-8")
-    updater = (ROOT / "scripts" / "update_public.ps1").read_text(encoding="utf-8")
+    daily_updater = (ROOT / "scripts" / "update_one_day.ps1").read_text(encoding="utf-8")
     assert "latest_ifind_session" in resolver
     assert "休市日不要返回" in resolver
     assert "stopped to avoid treating a holiday as a trading day" in resolver
-    assert "TargetDate must be earlier than today" in updater
+    assert "TargetDate must be earlier than today" in daily_updater
