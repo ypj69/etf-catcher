@@ -28,19 +28,15 @@ try{
   $CanResume=$false
   if($Resume -and (Test-Path -LiteralPath $MetaPath)){$Meta=Get-Content -LiteralPath $MetaPath -Raw|ConvertFrom-Json;$CanResume=$Meta.market_latest-eq $TargetDate -and $Meta.flow_latest-eq $TargetDate}
   if(-not $CanResume){
-    Write-Status 'running' 'market' 'collecting four dashboard market fields'
-    $Jobs=Join-Path $Root "data\raw\ifind\jobs_market_$RunId.json";$Results=Join-Path $Root "data\raw\ifind\results_market_$RunId.jsonl"
-    & $Python (Join-Path $PSScriptRoot 'prepare_ifind_jobs_t1.py') --date $TargetDate --output $Jobs *>>$Log;Assert-Step 'prepare market jobs'
-    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $Jobs --output $Results --concurrency 2 *>>$Log;Assert-Step 'market collection'
-    & $Python (Join-Path $PSScriptRoot 'deduplicate_ifind_results.py') --input $Results *>>$Log;Assert-Step 'deduplicate market results'
-    & $Python (Join-Path $PSScriptRoot 'ingest_ifind_t1.py') --input $Results --database $Database --date $TargetDate *>>$Log;Assert-Step 'market ingest'
+    Write-Status 'running' 'market' 'collecting minimal close and amount fields'
+    & $Python (Join-Path $PSScriptRoot 'ingest_market_minimal.py') --database $Database --date $TargetDate --workers 8 *>>$Log;Assert-Step 'minimal market collection'
+    Write-Status 'running' 'ownership' 'collecting fund share, scale and direct net flow in one iFinD pass'
+    $OwnershipJobs=Join-Path $Root "data\raw\ifind\jobs_ownership_$RunId.json";$OwnershipResults=Join-Path $Root "data\raw\ifind\results_ownership_$RunId.jsonl"
+    & $Python (Join-Path $PSScriptRoot 'prepare_ifind_direct_flow_jobs.py') --date $TargetDate --output $OwnershipJobs *>>$Log;Assert-Step 'prepare ownership jobs'
+    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $OwnershipJobs --output $OwnershipResults --tool get_fund_ownership --concurrency 2 *>>$Log;Assert-Step 'ownership collection'
+    & $Python (Join-Path $PSScriptRoot 'deduplicate_ifind_results.py') --input $OwnershipResults *>>$Log;Assert-Step 'deduplicate ownership results'
+    & $Python (Join-Path $PSScriptRoot 'ingest_ifind_direct_flows.py') --input $OwnershipResults --database $Database --date $TargetDate *>>$Log;Assert-Step 'ownership ingest'
     & $Python (Join-Path $PSScriptRoot 'validate_scale_units.py') --database $Database --date $TargetDate *>>$Log;Assert-Step 'scale validation'
-    Write-Status 'running' 'flow' 'collecting direct fund flow only'
-    $FlowJobs=Join-Path $Root "data\raw\ifind\jobs_flow_$RunId.json";$FlowResults=Join-Path $Root "data\raw\ifind\results_flow_$RunId.jsonl"
-    & $Python (Join-Path $PSScriptRoot 'prepare_ifind_direct_flow_jobs.py') --date $TargetDate --output $FlowJobs *>>$Log;Assert-Step 'prepare flow jobs'
-    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $FlowJobs --output $FlowResults --tool get_fund_ownership --concurrency 2 *>>$Log;Assert-Step 'direct flow collection'
-    & $Python (Join-Path $PSScriptRoot 'deduplicate_ifind_results.py') --input $FlowResults *>>$Log;Assert-Step 'deduplicate flow results'
-    & $Python (Join-Path $PSScriptRoot 'ingest_ifind_direct_flows.py') --input $FlowResults --database $Database --date $TargetDate *>>$Log;Assert-Step 'direct flow ingest'
     & $Python (Join-Path $PSScriptRoot 'calculate_estimated_flows_v2.py') --database $Database --start $TargetDate --end $TargetDate *>>$Log;Assert-Step 'estimated flow calculation'
     & $Python (Join-Path $PSScriptRoot 'resolve_direct_flows.py') --database $Database --date $TargetDate *>>$Log;Assert-Step 'flow resolution'
     & $Python (Join-Path $PSScriptRoot 'build_dashboard_data.py') --database $Database *>>$Log;Assert-Step 'dashboard build'

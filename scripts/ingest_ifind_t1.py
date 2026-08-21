@@ -65,9 +65,6 @@ def number_with_unit(value, unit):
     parsed = number(value)
     if parsed is None:
         return None
-    raw = str(value).strip().replace("\\t", "").replace(",", "")
-    if raw.endswith(("万", "亿", "万元", "亿元", "万份", "亿份", "万股", "亿股")):
-        return parsed
     normalized = str(unit or "").replace(" ", "")
     if normalized in {"亿元", "亿份", "亿股"}:
         return parsed * 1e8

@@ -5,8 +5,10 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -145,8 +147,25 @@ def local_research_context(body: dict, question: str) -> tuple[str, dict]:
     return encoded[:100_000], coverage
 
 
-def run_node(script: str, arguments: list[str], timeout: int) -> dict:
-    process = subprocess.run(["node", str(ROOT / "backend" / script), *arguments], capture_output=True, text=True, encoding="utf-8", timeout=timeout, check=True, env=os.environ.copy())
+def ifind_skill_ready() -> bool:
+    skill = ifind_skill_dir()
+    return (skill / "call-node.js").is_file() or (skill / "call.py").is_file()
+
+
+def ifind_node_ready() -> bool:
+    return bool(shutil.which("node")) and (ifind_skill_dir() / "call-node.js").is_file()
+
+
+def run_ifind_detail(code: str, timeout: int = 75) -> dict:
+    skill = ifind_skill_dir()
+    node = shutil.which("node")
+    if node and (skill / "call-node.js").is_file():
+        command = [node, str(ROOT / "backend" / "ifind_detail.js"), code]
+    elif (skill / "call.py").is_file():
+        command = [sys.executable, str(ROOT / "backend" / "ifind_detail.py"), code]
+    else:
+        raise RuntimeError("未检测到可用的 iFinD Skill（call-node.js 或 call.py）")
+    process = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=timeout, check=True, env=os.environ.copy())
     return json.loads(process.stdout)
 
 
@@ -196,11 +215,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(load_json(BASELINE, {}))
         if parsed.path in {"/api/setup/status", "/api/system/health"}:
             dates = database_dates()
-            skill = ifind_skill_dir() / "call-node.js"
-            payload = {"status": "ready" if dates["rows"] else "setup_required", "database": DATABASE.exists(), **dates, "data_policy": "latest_previous_complete_trading_day", "data_policy_zh": "最新上一个完整交易日", "schedule_not_before": "08:30", "ifind_skill": skill.exists(), "deepseek": bool(model_setting("DEEPSEEK_API_KEY")), "last_update": load_json(ROOT / "runtime" / "update_status.json", {})}
+            payload = {"status": "ready" if dates["rows"] else "setup_required", "database": DATABASE.exists(), **dates, "data_policy": "latest_previous_complete_trading_day", "data_policy_zh": "最新上一个完整交易日", "schedule_not_before": "08:30", "ifind_skill": ifind_skill_ready(), "deepseek": bool(model_setting("DEEPSEEK_API_KEY")), "last_update": load_json(ROOT / "runtime" / "update_status.json", {})}
             return self.send_json(payload)
         if parsed.path == "/api/ai/status":
-            return self.send_json({"configured": bool(model_setting("DEEPSEEK_API_KEY")), "model": model_setting("DEEPSEEK_MODEL", "deepseek-chat"), "local_database": DATABASE.exists(), "online_search": (ifind_skill_dir() / "call-node.js").exists(), "default_history_days": 60})
+            return self.send_json({"configured": bool(model_setting("DEEPSEEK_API_KEY")), "model": model_setting("DEEPSEEK_MODEL", "deepseek-chat"), "local_database": DATABASE.exists(), "online_search": ifind_node_ready(), "default_history_days": 60})
         if parsed.path == "/api/etf/detail":
             return self.etf_detail(parse_qs(parsed.query).get("code", [""])[0])
         if parsed.path.startswith("/data/"):
@@ -227,7 +245,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not CODE_RE.fullmatch(code):
             return self.send_json({"error": "ETF代码格式无效"}, 400)
         try:
-            result = run_node("ifind_detail.js", [code], 75)
+            result = run_ifind_detail(code)
             self.send_json({"code": code, "live": result, "source": "当前用户的iFinD账户"})
         except subprocess.TimeoutExpired:
             self.send_json({"error": "iFinD查询超时，请稍后重试"}, 504)

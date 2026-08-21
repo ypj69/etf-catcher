@@ -49,7 +49,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 
 不指定日期时，程序先取网页与SQLite共同确认的最后成功发布日期，再通过iFinD上证指数实际交易日期列出此后全部交易日，按日期升序逐日补至最新上一个完整交易日，不以周一至周五简单代替交易日历。法定休市日自动跳过；若某日失败，任务停止在该日，已成功日期仍保留并发布，下次运行从该日继续。
 
-每个交易日的行情与直接资金流都按5只ETF一批写入 `data/raw/ifind` 的增量结果文件。相同日期重跑时，采集器跳过已有成功结果，只重试未成功批次。`runtime/missing_sessions_plan.json` 记录本次缺口计划，`runtime/update_status.json` 记录批次总数、已完成数量和当前日期。
+每个交易日只执行一轮iFinD所有权采集，按5只ETF一批取得基金份额、基金规模和直接净流入，并写入 `data/raw/ifind` 的增量结果文件；收盘价和成交额由轻量日K线接口补充。相同日期重跑时，iFinD采集器跳过已有成功结果，只重试未成功批次。`runtime/missing_sessions_plan.json` 记录本次缺口计划，`runtime/update_status.json` 记录批次总数、已完成数量和当前日期。
 
 仅在诊断单个日期且用户明确指定时使用 `-TargetDate YYYY-MM-DD`；自动补缺不需要手工逐日运行。程序拒绝未来日期和当日日期。
 
