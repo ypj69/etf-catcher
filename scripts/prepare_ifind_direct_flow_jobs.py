@@ -24,13 +24,13 @@ def main() -> None:
         batch = rows[offset : offset + 5]
         subjects = "、".join(f"{row['etf_code']}.{row['exchange']}" for row in batch)
         query = (
-            f"分别查询{subjects}在{args.date}的净流入额。"
+            f"分别查询{subjects}在{args.date}的基金份额、基金规模和净流入额。"
             f"交易日期必须固定为{args.date}，不使用最新日期。"
-            "返回证券代码、证券简称、日期、净流入额和单位。"
+            "返回证券代码、证券简称、日期、基金份额、基金规模、净流入额和各字段单位。"
         )
         jobs.append(
             {
-                "job_id": f"direct_flow_{offset:04d}_{args.date}",
+                "job_id": f"ownership_{offset:04d}_{args.date}",
                 "codes": [row["etf_code"] for row in batch],
                 "start_date": args.date,
                 "end_date": args.date,

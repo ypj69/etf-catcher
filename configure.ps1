@@ -6,7 +6,7 @@ $LocalConfig=Join-Path $ConfigDir 'app.local.json'
 $Example=Get-Content -LiteralPath (Join-Path $ConfigDir 'app.example.json') -Raw|ConvertFrom-Json
 $SkillDefault=Join-Path $HOME '.codex\skills\ifind-finance-data'
 $SkillPath=if($env:IFIND_SKILL_DIR){$env:IFIND_SKILL_DIR}else{$SkillDefault}
-$SkillReady=Test-Path -LiteralPath (Join-Path $SkillPath 'call-node.js')
+$SkillReady=(Test-Path -LiteralPath (Join-Path $SkillPath 'call-node.js')) -or (Test-Path -LiteralPath (Join-Path $SkillPath 'call.py'))
 $ParsedTime=[datetime]::MinValue
 if(-not [datetime]::TryParseExact($DailyTime,'HH:mm',$null,[Globalization.DateTimeStyles]::None,[ref]$ParsedTime)){throw 'DailyTime must use HH:mm format.'}
 if($ParsedTime.TimeOfDay-lt [timespan]::FromHours(8.5)){throw 'DailyTime cannot be earlier than 08:30 because prior-trading-day iFinD data is not complete before then.'}
