@@ -143,7 +143,6 @@ def ingest(database: Path, target_date: str, records: dict[str, dict[str, object
     now = datetime.now(timezone.utc).isoformat()
     try:
         connection.execute("BEGIN IMMEDIATE")
-        connection.execute("DELETE FROM etf_direct_flow_observations WHERE trade_date=?", (target_date,))
         for code, item in records.items():
             direct = item["direct_net_flow"]
             if direct is not None:
@@ -151,7 +150,13 @@ def ingest(database: Path, target_date: str, records: dict[str, dict[str, object
                     """INSERT INTO etf_direct_flow_observations(
                            trade_date,etf_code,direct_net_flow,raw_value,source_unit,source,
                            source_field,available_at)
-                       VALUES(?,?,?,?,?,'iFinD_get_fund_ownership','净流入额',?)""",
+                       VALUES(?,?,?,?,?,'iFinD_get_fund_ownership','净流入额',?)
+                       ON CONFLICT(trade_date,etf_code) DO UPDATE SET
+                           direct_net_flow=COALESCE(etf_direct_flow_observations.direct_net_flow,excluded.direct_net_flow),
+                           raw_value=CASE WHEN etf_direct_flow_observations.direct_net_flow IS NULL
+                                          THEN excluded.raw_value ELSE etf_direct_flow_observations.raw_value END,
+                           available_at=CASE WHEN etf_direct_flow_observations.direct_net_flow IS NULL
+                                            THEN excluded.available_at ELSE etf_direct_flow_observations.available_at END""",
                     (target_date, code, direct, item["raw_flow"], "元", now),
                 )
             connection.execute(
@@ -161,8 +166,8 @@ def ingest(database: Path, target_date: str, records: dict[str, dict[str, object
                    VALUES(?,?,?,?,NULL,NULL,'get_fund_ownership|基金份额|基金规模|净流入额',?,
                           'flow_only','MARKET_DATA_MISSING_DIRECT_FLOW_AVAILABLE','1.2.0',?)
                    ON CONFLICT(trade_date,etf_code) DO UPDATE SET
-                       fund_share=COALESCE(excluded.fund_share,etf_daily.fund_share),
-                       fund_scale=COALESCE(excluded.fund_scale,etf_daily.fund_scale),
+                       fund_share=COALESCE(etf_daily.fund_share,excluded.fund_share),
+                       fund_scale=COALESCE(etf_daily.fund_scale,excluded.fund_scale),
                        available_at=excluded.available_at,
                        updated_at=excluded.updated_at""",
                 (target_date, code, item["fund_share"], item["fund_scale"], now, now),

@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory=$true)][string]$Python,
   [Parameter(Mandatory=$true)][string]$Database,
   [Parameter(Mandatory=$true)][string]$TargetDate,
-  [switch]$Resume
+  [switch]$Resume,
+  [switch]$CollectOnly
 )
 $ErrorActionPreference='Stop'
 $Root=Split-Path -Parent $PSScriptRoot
@@ -23,36 +24,46 @@ function Write-Status($State,$Stage,$Detail){[ordered]@{status=$State;stage=$Sta
 function Assert-Step($Name){if($LASTEXITCODE-ne 0){throw "$Name failed with exit code $LASTEXITCODE"}}
 try{
   Write-Status 'running' 'preflight' 'checking local database, Node and user iFinD skill'
-  & $Python (Join-Path $PSScriptRoot 'restore_processed_seeds.py') --database $Database *>>$Log;Assert-Step 'restore processed seeds'
+  & $Python (Join-Path $PSScriptRoot 'restore_processed_seeds.py') --database $Database *>>$Log
+  Assert-Step 'restore processed seeds'
   $MetaPath=Join-Path $Root 'data\web\meta.json'
   $CanResume=$false
-  if($Resume -and (Test-Path -LiteralPath $MetaPath)){$Meta=Get-Content -LiteralPath $MetaPath -Raw|ConvertFrom-Json;$CanResume=$Meta.market_latest-eq $TargetDate -and $Meta.flow_latest-eq $TargetDate}
-  if(-not $CanResume){
-    Write-Status 'running' 'market' 'collecting minimal close and amount fields'
-    & $Python (Join-Path $PSScriptRoot 'ingest_market_minimal.py') --database $Database --date $TargetDate --workers 8 *>>$Log;Assert-Step 'minimal market collection'
-    Write-Status 'running' 'ownership' 'collecting fund share, scale and direct net flow in one iFinD pass'
-    $OwnershipJobs=Join-Path $Root "data\raw\ifind\jobs_ownership_$RunId.json";$OwnershipResults=Join-Path $Root "data\raw\ifind\results_ownership_$RunId.jsonl"
-    & $Python (Join-Path $PSScriptRoot 'prepare_ifind_direct_flow_jobs.py') --date $TargetDate --output $OwnershipJobs *>>$Log;Assert-Step 'prepare ownership jobs'
-    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $OwnershipJobs --output $OwnershipResults --tool get_fund_ownership --concurrency 2 *>>$Log;Assert-Step 'ownership collection'
-    & $Python (Join-Path $PSScriptRoot 'deduplicate_ifind_results.py') --input $OwnershipResults *>>$Log;Assert-Step 'deduplicate ownership results'
-    & $Python (Join-Path $PSScriptRoot 'ingest_ifind_direct_flows.py') --input $OwnershipResults --database $Database --date $TargetDate *>>$Log;Assert-Step 'ownership ingest'
-    & $Python (Join-Path $PSScriptRoot 'validate_scale_units.py') --database $Database --date $TargetDate *>>$Log;Assert-Step 'scale validation'
-    & $Python (Join-Path $PSScriptRoot 'calculate_estimated_flows_v2.py') --database $Database --start $TargetDate --end $TargetDate *>>$Log;Assert-Step 'estimated flow calculation'
-    & $Python (Join-Path $PSScriptRoot 'resolve_direct_flows.py') --database $Database --date $TargetDate *>>$Log;Assert-Step 'flow resolution'
-    & $Python (Join-Path $PSScriptRoot 'build_dashboard_data.py') --database $Database *>>$Log;Assert-Step 'dashboard build'
-    & $Python (Join-Path $PSScriptRoot 'update_indices.py') --start $TargetDate --end $TargetDate *>>$Log;Assert-Step 'domestic indices'
-    & $Python (Join-Path $PSScriptRoot 'supplement_kospi.py') --start $TargetDate --end $TargetDate *>>$Log;Assert-Step 'overseas indices'
-    & $Python (Join-Path $PSScriptRoot 'normalize_index_labels.py') *>>$Log;Assert-Step 'index labels'
-    & $Python (Join-Path $PSScriptRoot 'apply_publication_cutoff.py') --date $TargetDate *>>$Log;Assert-Step 'publication cutoff'
-    & $Python (Join-Path $PSScriptRoot 'export_web_data.py') *>>$Log;Assert-Step 'web export'
-    & $Python (Join-Path $PSScriptRoot 'build_radar_web_data.py') *>>$Log;Assert-Step 'radar export'
-    & $Python (Join-Path $PSScriptRoot 'build_macro_monitor_data.py') --target-date $TargetDate *>>$Log;Assert-Step 'macro export'
-    & $Python (Join-Path $PSScriptRoot 'sync_authoritative_cache.py') --database $Database *>>$Log;Assert-Step 'authoritative cache sync'
-    & $Python (Join-Path $PSScriptRoot 'build_stable_fund_behavior_data.py') *>>$Log;Assert-Step 'stable fund behavior'
-    & $Python (Join-Path $PSScriptRoot 'overlay_tracking_indices.py') *>>$Log;Assert-Step 'tracking index overlay'
-    & $Python (Join-Path $PSScriptRoot 'enrich_web_meta.py') *>>$Log;Assert-Step 'web metadata'
+  if($Resume -and (Test-Path -LiteralPath $MetaPath)){
+    $Meta=Get-Content -LiteralPath $MetaPath -Raw|ConvertFrom-Json
+    $CanResume=$Meta.market_latest-eq $TargetDate -and $Meta.flow_latest-eq $TargetDate
   }
-  Write-Status 'running' 'validate' 'validating synchronized web publication'
-  & $Python (Join-Path $PSScriptRoot 'validate_t1_synchronized.py') --database $Database --date $TargetDate *>>$Log;Assert-Step 'synchronized validation'
+  if(-not $CanResume){
+    Write-Status 'running' 'market' 'collecting Tencent quotes with Eastmoney fallback'
+    & $Python (Join-Path $PSScriptRoot 'ingest_market_minimal.py') --database $Database --date $TargetDate --workers 8 *>>$Log
+    Assert-Step 'minimal market collection'
+    Write-Status 'running' 'ownership' 'collecting fund share, scale and direct net flow in one iFinD pass'
+    $OwnershipJobs=Join-Path $Root "data\raw\ifind\jobs_ownership_$RunId.json"
+    $OwnershipResults=Join-Path $Root "data\raw\ifind\results_ownership_$RunId.jsonl"
+    & $Python (Join-Path $PSScriptRoot 'prepare_ifind_direct_flow_jobs.py') --date $TargetDate --output $OwnershipJobs *>>$Log
+    Assert-Step 'prepare ownership jobs'
+    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $OwnershipJobs --output $OwnershipResults --tool get_fund_ownership --concurrency 2 *>>$Log
+    Assert-Step 'ownership collection'
+    & $Python (Join-Path $PSScriptRoot 'deduplicate_ifind_results.py') --input $OwnershipResults *>>$Log
+    Assert-Step 'deduplicate ownership results'
+    & $Python (Join-Path $PSScriptRoot 'ingest_ifind_direct_flows.py') --input $OwnershipResults --database $Database --date $TargetDate *>>$Log
+    Assert-Step 'ownership ingest'
+    & $Python (Join-Path $PSScriptRoot 'validate_scale_units.py') --database $Database --date $TargetDate *>>$Log
+    Assert-Step 'scale validation'
+    & $Python (Join-Path $PSScriptRoot 'calculate_estimated_flows_v2.py') --database $Database --start $TargetDate --end $TargetDate *>>$Log
+    Assert-Step 'estimated flow calculation'
+    & $Python (Join-Path $PSScriptRoot 'resolve_direct_flows.py') --database $Database --date $TargetDate *>>$Log
+    Assert-Step 'flow resolution'
+  }
+  & $Python (Join-Path $PSScriptRoot 'validate_daily_web_coverage.py') --database $Database --date $TargetDate *>>$Log
+  Assert-Step 'daily web field coverage'
+  if($CollectOnly){
+    Write-Status 'pass' 'collected' 'one trading day stored; web publication deferred until the batch is complete'
+    return
+  }
+  Write-Status 'running' 'publish' 'building all web outputs once'
+  & (Join-Path $PSScriptRoot 'publish_web.ps1') -Python $Python -Database $Database -TargetDate $TargetDate -StartDate $TargetDate
   Write-Status 'pass' 'complete' 'one trading day published successfully'
-}catch{Write-Status 'failed' 'error' $_.Exception.Message;throw}
+}catch{
+  Write-Status 'failed' 'error' $_.Exception.Message
+  throw
+}
