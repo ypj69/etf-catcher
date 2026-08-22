@@ -16,7 +16,8 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ETF Catcher/1.0"
+TENCENT_URL = "https://qt.gtimg.cn/q="
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ETF Catcher/1.0.3"
 _LOCAL = threading.local()
 
 
@@ -63,26 +64,94 @@ def fetch_market(code: str, target_date: str, retries: int = 3) -> dict[str, flo
     raise RuntimeError(str(last_error) if last_error else "market request failed")
 
 
+def tencent_symbol(code: str) -> str:
+    return ("sh" if code.startswith("5") else "sz") + code
+
+
+def parse_tencent_quotes(text: str, target_date: str) -> dict[str, dict[str, float | str]]:
+    expected_date = target_date.replace("-", "")
+    records: dict[str, dict[str, float | str]] = {}
+    for line in text.split(";"):
+        if '="' not in line:
+            continue
+        values = line.split('"', 2)[1].split("~")
+        if len(values) < 38:
+            continue
+        code = values[2]
+        quote_date = values[30][:8]
+        try:
+            close = float(values[3])
+            amount = float(values[37]) * 10_000.0
+        except (TypeError, ValueError):
+            continue
+        if quote_date != expected_date or close <= 0 or amount < 0:
+            continue
+        records[code] = {
+            "close": close,
+            "amount": amount,
+            "market_source": "tencent_quote",
+        }
+    return records
+
+
+def fetch_tencent_market(
+    codes: list[str], target_date: str, batch_size: int = 50, retries: int = 3
+) -> tuple[dict[str, dict[str, float | str]], dict[str, str]]:
+    records: dict[str, dict[str, float | str]] = {}
+    errors: dict[str, str] = {}
+    current = session()
+    current.headers.update({"Referer": "https://gu.qq.com/"})
+    for offset in range(0, len(codes), batch_size):
+        batch = codes[offset : offset + batch_size]
+        last_error: Exception | None = None
+        text = ""
+        for attempt in range(retries):
+            try:
+                response = current.get(
+                    TENCENT_URL + ",".join(tencent_symbol(code) for code in batch), timeout=20
+                )
+                response.raise_for_status()
+                text = response.content.decode("gbk", errors="ignore")
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < retries:
+                    time.sleep(0.4 * (attempt + 1))
+        parsed = parse_tencent_quotes(text, target_date) if text else {}
+        records.update(parsed)
+        for code in batch:
+            if code not in parsed:
+                errors[code] = str(last_error)[:300] if last_error else "target date unavailable"
+        time.sleep(0.08)
+    return records, errors
+
+
 def enabled_codes() -> list[str]:
     with (ROOT / "config" / "etf_universe.csv").open(encoding="utf-8-sig", newline="") as handle:
         return [row["etf_code"] for row in csv.DictReader(handle) if row.get("enabled") == "1"]
 
 
-def collect(codes: list[str], target_date: str, workers: int) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
-    records: dict[str, dict[str, float]] = {}
-    errors: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
-        futures = {executor.submit(fetch_market, code, target_date): code for code in codes}
-        for future in as_completed(futures):
-            code = futures[future]
-            try:
-                row = future.result()
-                if row is not None:
-                    records[code] = row
-                else:
-                    errors[code] = "target date unavailable"
-            except Exception as exc:
-                errors[code] = str(exc)[:300]
+def collect(codes: list[str], target_date: str, workers: int) -> tuple[dict[str, dict[str, float | str]], dict[str, str]]:
+    records, errors = fetch_tencent_market(codes, target_date)
+    required = max(1, math.ceil(len(codes) * 0.95))
+    if len(records) >= required:
+        return records, errors
+
+    # Historical/backfill dates may not match Tencent's latest quote timestamp.
+    # Fall back to Eastmoney only when Tencent cannot meet the publication gate,
+    # and keep it serial to avoid aggravating push2his IP rate limiting.
+    missing = [code for code in codes if code not in records]
+    for code in missing:
+        try:
+            row = fetch_market(code, target_date)
+            if row is not None:
+                records[code] = {**row, "market_source": "eastmoney_kline"}
+                errors.pop(code, None)
+            else:
+                errors[code] = "target date unavailable"
+        except Exception as exc:
+            errors[code] = str(exc)[:300]
+        time.sleep(1.1)
     return records, errors
 
 
@@ -93,19 +162,35 @@ def ingest(database: Path, target_date: str, records: dict[str, dict[str, float]
         INSERT INTO etf_daily(
             trade_date,etf_code,close,amount,market_source,source_field,
             available_at,data_status,reason_code,schema_version,updated_at
-        ) VALUES(?,?,?,?,'eastmoney_kline','close|amount',?,'market_only',
+        ) VALUES(?,?,?,?,?,'close|amount',?,'market_only',
                  'PENDING_OWNERSHIP_AND_FLOW','1.2.0',?)
         ON CONFLICT(trade_date,etf_code) DO UPDATE SET
-            close=excluded.close,amount=excluded.amount,
-            market_source=excluded.market_source,
-            source_field=excluded.source_field,
-            available_at=excluded.available_at,
-            updated_at=excluded.updated_at
+            close=COALESCE(etf_daily.close,excluded.close),
+            amount=COALESCE(etf_daily.amount,excluded.amount),
+            market_source=CASE WHEN etf_daily.close IS NULL OR etf_daily.amount IS NULL
+                               THEN excluded.market_source ELSE etf_daily.market_source END,
+            source_field=CASE WHEN etf_daily.close IS NULL OR etf_daily.amount IS NULL
+                              THEN excluded.source_field ELSE etf_daily.source_field END,
+            available_at=CASE WHEN etf_daily.close IS NULL OR etf_daily.amount IS NULL
+                              THEN excluded.available_at ELSE etf_daily.available_at END,
+            updated_at=CASE WHEN etf_daily.close IS NULL OR etf_daily.amount IS NULL
+                            THEN excluded.updated_at ELSE etf_daily.updated_at END
     """
     try:
         connection.execute("BEGIN IMMEDIATE")
         for code, row in records.items():
-            connection.execute(sql, (target_date, code, row["close"], row["amount"], now, now))
+            connection.execute(
+                sql,
+                (
+                    target_date,
+                    code,
+                    row["close"],
+                    row["amount"],
+                    row.get("market_source", "eastmoney_kline"),
+                    now,
+                    now,
+                ),
+            )
         connection.execute(
             """UPDATE etf_daily AS current
                SET pct_change=(current.close/(
@@ -140,7 +225,7 @@ def main() -> None:
     records, errors = collect(codes, args.date, args.workers)
     required = max(1, math.ceil(len(codes) * args.minimum_coverage))
     if len(records) < required:
-        raise RuntimeError(f"Eastmoney market coverage {len(records)}/{len(codes)} is below required {required}; sample errors: {dict(list(errors.items())[:10])}")
+        raise RuntimeError(f"Market source coverage {len(records)}/{len(codes)} is below required {required}; sample errors: {dict(list(errors.items())[:10])}")
     ingest(Path(args.database), args.date, records)
     print(json.dumps({"status": "pass", "date": args.date, "requested": len(codes), "market_rows": len(records), "errors": len(errors), "error_sample": dict(list(errors.items())[:10])}, ensure_ascii=False))
 

@@ -88,3 +88,100 @@ def test_minimal_market_ingest_updates_close_amount_and_return(tmp_path: Path) -
     assert row[1] == 123456.0
     assert row[2] == pytest.approx(10.0)
     assert row[3] == "eastmoney_kline"
+
+
+def test_tencent_is_primary_and_eastmoney_only_fills_missing_codes(monkeypatch) -> None:
+    market = load_module(ROOT / "scripts" / "ingest_market_minimal.py", "market_fallback")
+    monkeypatch.setattr(
+        market,
+        "fetch_tencent_market",
+        lambda codes, target_date: (
+            {"510300": {"close": 4.0, "amount": 100.0, "market_source": "tencent_quote"}},
+            {"510500": "missing"},
+        ),
+    )
+    observed = []
+
+    def eastmoney(code, target_date):
+        observed.append(code)
+        return {"close": 5.0, "amount": 200.0}
+
+    monkeypatch.setattr(market, "fetch_market", eastmoney)
+    monkeypatch.setattr(market.time, "sleep", lambda seconds: None)
+    records, errors = market.collect(["510300", "510500"], "2026-08-20", workers=8)
+    assert observed == ["510500"]
+    assert records["510300"]["market_source"] == "tencent_quote"
+    assert records["510500"]["market_source"] == "eastmoney_kline"
+    assert errors == {}
+
+
+def test_market_backfill_does_not_overwrite_existing_success(tmp_path: Path) -> None:
+    import sqlite3
+
+    market = load_module(ROOT / "scripts" / "ingest_market_minimal.py", "market_idempotent")
+    database = tmp_path / "market.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """CREATE TABLE etf_daily(
+                trade_date TEXT, etf_code TEXT, close REAL, amount REAL, pct_change REAL,
+                market_source TEXT, source_field TEXT, available_at TEXT, data_status TEXT,
+                reason_code TEXT, schema_version TEXT, updated_at TEXT,
+                PRIMARY KEY(trade_date, etf_code))"""
+        )
+        connection.execute(
+            """INSERT INTO etf_daily(
+                trade_date,etf_code,close,amount,market_source,source_field,available_at,updated_at
+            ) VALUES('2026-08-20','510300',4.0,100.0,'original','close|amount','old','old')"""
+        )
+    market.ingest(
+        database,
+        "2026-08-20",
+        {"510300": {"close": 9.0, "amount": 900.0, "market_source": "tencent_quote"}},
+    )
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            "SELECT close,amount,market_source FROM etf_daily WHERE trade_date='2026-08-20'"
+        ).fetchone()
+    assert row == (4.0, 100.0, "original")
+
+def test_ownership_backfill_only_fills_missing_values(tmp_path: Path) -> None:
+    import sqlite3
+
+    ingest = load_module(ROOT / "scripts" / "ingest_ifind_direct_flows.py", "ownership_idempotent")
+    database = tmp_path / "ownership.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """CREATE TABLE etf_daily(
+                trade_date TEXT,etf_code TEXT,fund_share REAL,fund_scale REAL,
+                market_source TEXT,flow_source TEXT,source_field TEXT,available_at TEXT,
+                data_status TEXT,reason_code TEXT,schema_version TEXT,updated_at TEXT,
+                PRIMARY KEY(trade_date,etf_code))"""
+        )
+    first = {
+        "510300": {
+            "fund_share": 100.0,
+            "fund_scale": 200.0,
+            "direct_net_flow": 10.0,
+            "raw_flow": "10",
+        }
+    }
+    second = {
+        "510300": {
+            "fund_share": 999.0,
+            "fund_scale": 999.0,
+            "direct_net_flow": 999.0,
+            "raw_flow": "999",
+        }
+    }
+    ingest.ingest(database, "2026-08-20", first)
+    ingest.ingest(database, "2026-08-20", second)
+    with sqlite3.connect(database) as connection:
+        daily = connection.execute(
+            "SELECT fund_share,fund_scale FROM etf_daily WHERE trade_date='2026-08-20'"
+        ).fetchone()
+        direct = connection.execute(
+            """SELECT direct_net_flow FROM etf_direct_flow_observations
+               WHERE trade_date='2026-08-20' AND etf_code='510300'"""
+        ).fetchone()
+    assert daily == (100.0, 200.0)
+    assert direct == (10.0,)

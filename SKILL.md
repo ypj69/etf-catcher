@@ -17,10 +17,10 @@ Treat this skill directory as the application root. Keep the user's database, ac
 
 - The authoritative local history starts on 2025-01-01. Web charts intentionally display 2026 onward; 2025 is retained for rolling warm-up and research history.
 - Every daily run targets the latest previous complete trading day. Do not publish partial current-day data.
-- After a fresh install or downtime, automatic updates must backfill every unpublished iFinD exchange session in chronological order. Stop on the first failed session and resume from it on the next run; never jump directly to the latest date.
+- After a fresh install or downtime, automatic updates must inspect only real sessions after the last successful web publication, reuse already-complete rows, collect the remaining gap chronologically, and publish the web once after the batch. Ordinary daily runs must not rescan older published history.
 - Never register an automatic update earlier than 08:30 local time. iFinD prior-day fields are not considered complete before then. A later user-selected time is valid.
 - Use the current Windows user's iFinD Skill and DPAPI-protected DeepSeek key. Never print, copy, commit, or transmit secrets outside their intended API calls.
-- Repeated updates must remain idempotent. If a data source fails, preserve the last successful published data and report its actual cutoff date.
+- Repeated updates must remain idempotent and fill nulls without overwriting successful observations. Require 95% daily coverage; preserve the last successful web while a gap is retried, and quarantine a date after three distinct failed runs so it cannot block newer sessions forever.
 - Do not change the locked ETF Catcher 1.0 page design when performing setup or operations.
 
 ## Safe interpretation
