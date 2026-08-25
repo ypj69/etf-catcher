@@ -11,13 +11,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from universe_paths import active_universe_path
+except ModuleNotFoundError:
+    from scripts.universe_paths import active_universe_path
+
 import requests
 
 
 ROOT = Path(__file__).resolve().parents[1]
 URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-TENCENT_URL = "https://qt.gtimg.cn/q="
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ETF Catcher/1.0.3"
+TENCENT_HISTORY_URL = "https://web.ifzq.gtimg.cn/appstock/app/day/query"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ETF Catcher/1.0.4"
 _LOCAL = threading.local()
 
 
@@ -68,78 +73,96 @@ def tencent_symbol(code: str) -> str:
     return ("sh" if code.startswith("5") else "sz") + code
 
 
-def parse_tencent_quotes(text: str, target_date: str) -> dict[str, dict[str, float | str]]:
+def parse_tencent_history(
+    payload: dict, code: str, target_date: str
+) -> dict[str, float | str] | None:
+    """Return the requested day's final close and cumulative turnover.
+
+    Tencent's daily K-line endpoint has OHLC and volume but no turnover. The
+    target-date intraday endpoint exposes cumulative volume and turnover, so
+    its final record is the exact close/amount pair needed by the dashboard.
+    """
+    symbol = tencent_symbol(code)
     expected_date = target_date.replace("-", "")
-    records: dict[str, dict[str, float | str]] = {}
-    for line in text.split(";"):
-        if '="' not in line:
+    days = (((payload.get("data") or {}).get(symbol) or {}).get("data") or [])
+    for day in days:
+        if str(day.get("date", "")) != expected_date:
             continue
-        values = line.split('"', 2)[1].split("~")
-        if len(values) < 38:
-            continue
-        code = values[2]
-        quote_date = values[30][:8]
+        points = day.get("data") or []
+        if not points:
+            return None
+        values = str(points[-1]).split()
+        if len(values) < 4:
+            return None
         try:
-            close = float(values[3])
-            amount = float(values[37]) * 10_000.0
+            close = float(values[1])
+            amount = float(values[3])
         except (TypeError, ValueError):
-            continue
-        if quote_date != expected_date or close <= 0 or amount < 0:
-            continue
-        records[code] = {
+            return None
+        if not math.isfinite(close) or close <= 0 or not math.isfinite(amount) or amount < 0:
+            return None
+        return {
             "close": close,
             "amount": amount,
-            "market_source": "tencent_quote",
+            "market_source": "tencent_day_history",
         }
-    return records
+    return None
 
 
-def fetch_tencent_market(
-    codes: list[str], target_date: str, batch_size: int = 50, retries: int = 3
-) -> tuple[dict[str, dict[str, float | str]], dict[str, str]]:
-    records: dict[str, dict[str, float | str]] = {}
-    errors: dict[str, str] = {}
+def fetch_tencent_history(
+    code: str, target_date: str, retries: int = 3
+) -> dict[str, float | str] | None:
+    last_error: Exception | None = None
     current = session()
     current.headers.update({"Referer": "https://gu.qq.com/"})
-    for offset in range(0, len(codes), batch_size):
-        batch = codes[offset : offset + batch_size]
-        last_error: Exception | None = None
-        text = ""
-        for attempt in range(retries):
-            try:
-                response = current.get(
-                    TENCENT_URL + ",".join(tencent_symbol(code) for code in batch), timeout=20
-                )
-                response.raise_for_status()
-                text = response.content.decode("gbk", errors="ignore")
-                break
-            except Exception as exc:
-                last_error = exc
-                if attempt + 1 < retries:
-                    time.sleep(0.4 * (attempt + 1))
-        parsed = parse_tencent_quotes(text, target_date) if text else {}
-        records.update(parsed)
-        for code in batch:
-            if code not in parsed:
-                errors[code] = str(last_error)[:300] if last_error else "target date unavailable"
-        time.sleep(0.08)
-    return records, errors
+    for attempt in range(retries):
+        try:
+            response = current.get(
+                TENCENT_HISTORY_URL,
+                params={"code": tencent_symbol(code), "date": target_date.replace("-", "")},
+                timeout=20,
+            )
+            response.raise_for_status()
+            return parse_tencent_history(response.json(), code, target_date)
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < retries:
+                time.sleep(0.4 * (attempt + 1))
+    raise RuntimeError(str(last_error) if last_error else "Tencent history request failed")
 
 
 def enabled_codes() -> list[str]:
-    with (ROOT / "config" / "etf_universe.csv").open(encoding="utf-8-sig", newline="") as handle:
+    with active_universe_path().open(encoding="utf-8-sig", newline="") as handle:
         return [row["etf_code"] for row in csv.DictReader(handle) if row.get("enabled") == "1"]
 
 
 def collect(codes: list[str], target_date: str, workers: int) -> tuple[dict[str, dict[str, float | str]], dict[str, str]]:
-    records, errors = fetch_tencent_market(codes, target_date)
+    records: dict[str, dict[str, float | str]] = {}
+    errors: dict[str, str] = {}
+
+    # Always request the explicit trading date. A latest quote cannot represent
+    # T-1 after Tencent's timestamp has rolled forward to the current session.
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        futures = {
+            executor.submit(fetch_tencent_history, code, target_date): code for code in codes
+        }
+        for future in as_completed(futures):
+            code = futures[future]
+            try:
+                row = future.result()
+                if row is not None:
+                    records[code] = row
+                else:
+                    errors[code] = "target date unavailable from Tencent history"
+            except Exception as exc:
+                errors[code] = str(exc)[:300]
+
     required = max(1, math.ceil(len(codes) * 0.95))
     if len(records) >= required:
         return records, errors
 
-    # Historical/backfill dates may not match Tencent's latest quote timestamp.
-    # Fall back to Eastmoney only when Tencent cannot meet the publication gate,
-    # and keep it serial to avoid aggravating push2his IP rate limiting.
+    # Eastmoney is a residual fallback only. Keep it serial to avoid aggravating
+    # push2his IP rate limiting; the normal daily path should not reach it.
     missing = [code for code in codes if code not in records]
     for code in missing:
         try:
@@ -215,7 +238,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", default=str(ROOT / "data" / "etf_flow.sqlite3"))
     parser.add_argument("--date", required=True)
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=24)
     parser.add_argument("--minimum-coverage", type=float, default=0.95)
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()

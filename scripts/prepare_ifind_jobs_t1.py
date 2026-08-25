@@ -1,10 +1,14 @@
 ﻿from __future__ import annotations
 import argparse, csv, json
 from pathlib import Path
+try:
+ from universe_paths import active_universe_path
+except ModuleNotFoundError:
+ from scripts.universe_paths import active_universe_path
 ROOT=Path(__file__).resolve().parents[1]
 def main():
  p=argparse.ArgumentParser(); p.add_argument('--date',required=True); p.add_argument('--output',required=True); p.add_argument('--limit',type=int); a=p.parse_args()
- with (ROOT/'config'/'etf_universe.csv').open(encoding='utf-8-sig',newline='') as h: rows=[r for r in csv.DictReader(h) if r.get('enabled')=='1']
+ with active_universe_path().open(encoding='utf-8-sig',newline='') as h: rows=[r for r in csv.DictReader(h) if r.get('enabled')=='1']
  if a.limit: rows=rows[:a.limit]
  # Public build: only fields consumed by the dashboard. pct_change is derived locally.
  fields='基金份额、基金规模、收盘价和成交额'

@@ -3,6 +3,7 @@ config/app.local.json
 config/secrets.local.dpapi
 data/*.sqlite3
 data/*.sqlite3-*
+data/etf_universe.csv
 data/web/*.json
 dist/*
 !dist/.gitkeep
