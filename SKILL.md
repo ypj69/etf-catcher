@@ -19,8 +19,11 @@ Treat this skill directory as the application root. Keep the user's database, ac
 - Every daily run targets the latest previous complete trading day. Do not publish partial current-day data.
 - After a fresh install or downtime, automatic updates must inspect only real sessions after the last successful web publication, reuse already-complete rows, collect the remaining gap chronologically, and publish the web once after the batch. Ordinary daily runs must not rescan older published history.
 - Never register an automatic update earlier than 08:30 local time. iFinD prior-day fields are not considered complete before then. A later user-selected time is valid.
+- Installation and configuration do not create a Windows scheduled task. Create or change a schedule only when the user explicitly asks the agent to do so, and keep it at or after 08:30.
 - Use the current Windows user's iFinD Skill and DPAPI-protected DeepSeek key. Never print, copy, commit, or transmit secrets outside their intended API calls.
 - Repeated updates must remain idempotent and fill nulls without overwriting successful observations. Require 95% daily coverage; preserve the last successful web while a gap is retried, and quarantine a date after three distinct failed runs so it cannot block newer sessions forever.
+- Market collection must request Tencent history for the exact target date; never substitute a latest quote during backfill. Eastmoney target-date K-line is residual fallback only.
+- The weekly universe check is part of `update.ps1` and uses no iFinD quota. Preserve `data/etf_universe.csv` across upgrades; never replace it with the bundled baseline. Low-confidence additions stay disabled, and an existing ETF needs three successful weekly absences before deactivation.
 - Do not change the locked ETF Catcher 1.0 page design when performing setup or operations.
 
 ## Safe interpretation

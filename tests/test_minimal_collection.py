@@ -90,16 +90,41 @@ def test_minimal_market_ingest_updates_close_amount_and_return(tmp_path: Path) -
     assert row[3] == "eastmoney_kline"
 
 
-def test_tencent_is_primary_and_eastmoney_only_fills_missing_codes(monkeypatch) -> None:
+def test_tencent_history_parser_uses_requested_day_final_cumulative_values() -> None:
+    market = load_module(ROOT / "scripts" / "ingest_market_minimal.py", "minimal_history_parser")
+    payload = {
+        "data": {
+            "sh510300": {
+                "data": [
+                    {"date": "20260825", "data": ["1500 4.616 1954491 899423027.00"]},
+                    {
+                        "date": "20260824",
+                        "data": [
+                            "0930 4.678 41763 19536731.00",
+                            "1500 4.627 9229738 4287529940.00",
+                        ],
+                    },
+                ]
+            }
+        }
+    }
+    parsed = market.parse_tencent_history(payload, "510300", "2026-08-24")
+    assert parsed == {
+        "close": 4.627,
+        "amount": 4_287_529_940.0,
+        "market_source": "tencent_day_history",
+    }
+    assert market.parse_tencent_history(payload, "510300", "2026-08-20") is None
+
+
+def test_tencent_history_is_primary_and_eastmoney_only_fills_missing_codes(monkeypatch) -> None:
     market = load_module(ROOT / "scripts" / "ingest_market_minimal.py", "market_fallback")
-    monkeypatch.setattr(
-        market,
-        "fetch_tencent_market",
-        lambda codes, target_date: (
-            {"510300": {"close": 4.0, "amount": 100.0, "market_source": "tencent_quote"}},
-            {"510500": "missing"},
-        ),
-    )
+    def tencent(code, target_date):
+        if code == "510300":
+            return {"close": 4.0, "amount": 100.0, "market_source": "tencent_day_history"}
+        return None
+
+    monkeypatch.setattr(market, "fetch_tencent_history", tencent)
     observed = []
 
     def eastmoney(code, target_date):
@@ -110,7 +135,7 @@ def test_tencent_is_primary_and_eastmoney_only_fills_missing_codes(monkeypatch) 
     monkeypatch.setattr(market.time, "sleep", lambda seconds: None)
     records, errors = market.collect(["510300", "510500"], "2026-08-20", workers=8)
     assert observed == ["510500"]
-    assert records["510300"]["market_source"] == "tencent_quote"
+    assert records["510300"]["market_source"] == "tencent_day_history"
     assert records["510500"]["market_source"] == "eastmoney_kline"
     assert errors == {}
 

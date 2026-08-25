@@ -50,7 +50,7 @@ def test_single_server_entry_and_public_baseline() -> None:
     assert sorted(path.name for path in (ROOT / "backend").glob("server*.py")) == ["server.py"]
     baseline = json.loads((ROOT / "config" / "production_baseline.json").read_text(encoding="utf-8"))
     assert baseline["server_entry"] == "backend/server.py"
-    assert baseline["baseline_id"] == "etf-catcher-public-1.0.3"
+    assert baseline["baseline_id"] == "etf-catcher-public-1.0.4"
 
 
 def test_local_skill_and_schedule_floor() -> None:
@@ -61,6 +61,14 @@ def test_local_skill_and_schedule_floor() -> None:
     configure = (ROOT / "configure.ps1").read_text(encoding="utf-8")
     assert "cannot be earlier than 08:30" in register
     assert "cannot be earlier than 08:30" in configure
+
+
+def test_user_universe_is_local_and_daily_update_runs_weekly_maintenance() -> None:
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    update = (ROOT / "scripts" / "update_public.ps1").read_text(encoding="utf-8")
+    assert "data/etf_universe.csv" in ignore
+    assert "maintain_etf_universe.py" in update
+    assert update.index("maintain_etf_universe.py") < update.index("plan_missing_sessions.py")
 
 
 def test_previous_complete_trading_day_is_disclosed() -> None:
