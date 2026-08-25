@@ -33,8 +33,8 @@ try{
     $CanResume=$Meta.market_latest-eq $TargetDate -and $Meta.flow_latest-eq $TargetDate
   }
   if(-not $CanResume){
-    Write-Status 'running' 'market' 'collecting Tencent quotes with Eastmoney fallback'
-    & $Python (Join-Path $PSScriptRoot 'ingest_market_minimal.py') --database $Database --date $TargetDate --workers 8 *>>$Log
+    Write-Status 'running' 'market' 'collecting target-date Tencent history with residual Eastmoney fallback'
+    & $Python (Join-Path $PSScriptRoot 'ingest_market_minimal.py') --database $Database --date $TargetDate --workers 24 *>>$Log
     Assert-Step 'minimal market collection'
     Write-Status 'running' 'ownership' 'collecting fund share, scale and direct net flow in one iFinD pass'
     $OwnershipJobs=Join-Path $Root "data\raw\ifind\jobs_ownership_$RunId.json"

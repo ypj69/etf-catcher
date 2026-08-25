@@ -5,6 +5,11 @@ import csv
 import json
 from pathlib import Path
 
+try:
+    from universe_paths import active_universe_path
+except ModuleNotFoundError:
+    from scripts.universe_paths import active_universe_path
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,7 +20,7 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
-    with (ROOT / "config" / "etf_universe.csv").open(encoding="utf-8-sig", newline="") as handle:
+    with active_universe_path().open(encoding="utf-8-sig", newline="") as handle:
         rows = [row for row in csv.DictReader(handle) if row.get("enabled") == "1"]
     if args.limit:
         rows = rows[: args.limit]

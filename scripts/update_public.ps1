@@ -13,6 +13,7 @@ $Lock=Join-Path $Runtime 'update.lock.json'
 $Status=Join-Path $Runtime 'update_status.json'
 $PlanPath=Join-Path $Runtime 'missing_sessions_plan.json'
 $FailureState=Join-Path $Runtime 'backfill_failures.json'
+$UniverseLog=Join-Path $Logs "etf_universe_$((Get-Date).ToString('yyyyMMdd')).log"
 $UpdateRunId=(Get-Date).ToString('yyyyMMddTHHmmssfffffff')
 $CurrentDate=$null
 $Completed=0
@@ -35,6 +36,14 @@ if(Test-Path -LiteralPath $Lock){
 }
 [ordered]@{pid=$PID;requested_target=$TargetDate;run_id=$UpdateRunId;started_at=(Get-Date).ToString('o')}|ConvertTo-Json|Set-Content -LiteralPath $Lock -Encoding utf8
 try{
+  Write-BatchStatus 'running' 'universe' 'checking whether the weekly ETF universe maintenance is due'
+  $UniverseScript=Join-Path $PSScriptRoot 'maintain_etf_universe.py'
+  if(Test-Path -LiteralPath $UniverseScript){
+    & $Python $UniverseScript --database $Database --nonblocking *>> $UniverseLog
+    if($LASTEXITCODE-ne 0){Write-Warning "ETF universe maintenance returned exit code $LASTEXITCODE; the last successful universe remains active."}
+  }else{
+    Write-Warning 'ETF universe maintenance script is unavailable; the last successful universe remains active.'
+  }
   if($TargetDate){
     $Dates=@($TargetDate)
     $GapDates=@($TargetDate)
