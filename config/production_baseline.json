@@ -1,10 +1,6 @@
 {
   "schema_version": 2,
-<<<<<<< HEAD
-  "baseline_id": "etf-catcher-public-1.0.1",
-=======
   "baseline_id": "etf-catcher-public-1.0.5",
->>>>>>> 54c7ca7 (feat: release ETF Catcher v1.0.5)
   "frontend_entry": "frontend/index_v2.html",
   "server_entry": "backend/server.py",
   "daily_entry": "update.ps1",
