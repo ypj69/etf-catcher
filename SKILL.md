@@ -17,13 +17,17 @@ Treat this skill directory as the application root. Keep the user's database, ac
 
 - The authoritative local history starts on 2025-01-01. Web charts intentionally display 2026 onward; 2025 is retained for rolling warm-up and research history.
 - Every daily run targets the latest previous complete trading day. Do not publish partial current-day data.
-- After a fresh install or downtime, automatic updates must inspect only real sessions after the last successful web publication, reuse already-complete rows, collect the remaining gap chronologically, and publish the web once after the batch. Ordinary daily runs must not rescan older published history.
+- After a fresh install or downtime, automatic updates must backfill every unpublished iFinD exchange session in chronological order. Stop on the first failed session and resume from it on the next run; never jump directly to the latest date.
 - Never register an automatic update earlier than 08:30 local time. iFinD prior-day fields are not considered complete before then. A later user-selected time is valid.
-- Installation and configuration do not create a Windows scheduled task. Create or change a schedule only when the user explicitly asks the agent to do so, and keep it at or after 08:30.
 - Use the current Windows user's iFinD Skill and DPAPI-protected DeepSeek key. Never print, copy, commit, or transmit secrets outside their intended API calls.
+<<<<<<< HEAD
+- Repeated updates must remain idempotent. If a data source fails, preserve the last successful published data and report its actual cutoff date.
+=======
 - Repeated updates must remain idempotent and fill nulls without overwriting successful observations. Require 95% daily coverage; preserve the last successful web while a gap is retried, and quarantine a date after three distinct failed runs so it cannot block newer sessions forever.
 - Market collection must request Tencent history for the exact target date; never substitute a latest quote during backfill. Eastmoney target-date K-line is residual fallback only.
 - The weekly universe check is part of `update.ps1` and uses no iFinD quota. Preserve `data/etf_universe.csv` across upgrades; never replace it with the bundled baseline. Low-confidence additions stay disabled, and an existing ETF needs three successful weekly absences before deactivation.
+- Keep the default daily web path limited to collection, idempotent storage, web-cache generation, and synchronized coverage/date validation. Do not add research-ready dataset builds or development test suites. Notification is opt-in only: never enable or configure it without the user's explicit request, and keep notification failure nonblocking after a successful web update.
+>>>>>>> 54c7ca7 (feat: release ETF Catcher v1.0.5)
 - Do not change the locked ETF Catcher 1.0 page design when performing setup or operations.
 
 ## Safe interpretation
