@@ -24,6 +24,7 @@ Treat this skill directory as the application root. Keep the user's database, ac
 - Repeated updates must remain idempotent and fill nulls without overwriting successful observations. Require 95% daily coverage; preserve the last successful web while a gap is retried, and quarantine a date after three distinct failed runs so it cannot block newer sessions forever.
 - Market collection must request Tencent history for the exact target date; never substitute a latest quote during backfill. Eastmoney target-date K-line is residual fallback only.
 - The weekly universe check is part of `update.ps1` and uses no iFinD quota. Preserve `data/etf_universe.csv` across upgrades; never replace it with the bundled baseline. Low-confidence additions stay disabled, and an existing ETF needs three successful weekly absences before deactivation.
+- Keep the default daily web path limited to collection, idempotent storage, web-cache generation, and synchronized coverage/date validation. Do not add research-ready dataset builds or development test suites. Notification is opt-in only: never enable or configure it without the user's explicit request, and keep notification failure nonblocking after a successful web update.
 - Do not change the locked ETF Catcher 1.0 page design when performing setup or operations.
 
 ## Safe interpretation

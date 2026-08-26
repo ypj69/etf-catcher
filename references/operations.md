@@ -52,6 +52,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 
 正式更新入口在缺口检查前运行ETF名单维护。首次运行从 `config/etf_universe.csv` 复制出用户本地的 `data/etf_universe.csv`；后续采集只读取本地名单，代码升级不得覆盖。维护每7天最多执行一次：高置信度新ETF自动启用，低置信度新ETF标为 `needs_review` 且不采集；已有ETF连续3次成功周检缺失才停用，重新出现时恢复。运行结果见 `runtime/etf_universe_maintenance.json`，历史事件见 `runtime/etf_universe_maintenance_history.jsonl`，日志见 `logs/etf_universe_YYYYMMDD.log`。公开源失败或返回规模异常时保留旧名单并继续每日任务。
 
+默认每日更新到同步校验通过即结束，只运行网页必需的数据采集、入库和JSON构建。量化研究清洗层和开发回归测试不属于每日链路。消息通知默认关闭；只有用户明确选择并配置自己的通知渠道后，agent才可启用 `notifications_enabled` 和通知扩展。通知必须位于网页同步校验之后，失败不得把已准确发布的网页标记为失败。
+
 仅在诊断单个日期且用户明确指定时使用 `-TargetDate YYYY-MM-DD`；自动补缺不需要手工逐日运行。程序拒绝未来日期和当日日期。
 
 ## 健康检查
