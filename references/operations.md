@@ -35,9 +35,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 
 ```powershell
 .\start.ps1
+.\scripts\register_tasks.ps1 -DailyTime "09:15"
 ```
 
-网页默认地址读取 `config/production_baseline.json`。安装器和配置器不会自行创建Windows定时任务；用户要求自动运行时，由其agent按用户选定时间建立，且必须在08:30或之后。网页更新口径始终是最新上一个完整交易日。
+网页默认地址读取 `config/production_baseline.json`。任务注册器同时建立每日更新和登录后网页服务；任何早于08:30的时间必须被拒绝。
 
 ## 手动更新与恢复
 
@@ -46,11 +47,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 .\update.ps1 -Resume
 ```
 
-不指定日期时，程序先取网页与SQLite共同确认的最后成功发布日期，只检查该日之后至最新上一个完整交易日的停机缺口，不回扫更早已发布历史。交易日优先取腾讯沪深300真实日K，腾讯不可用时使用iFinD上证指数实际交易日，不以周一至周五简单猜测。已达到95%完整度的日期直接复用，剩余日期按顺序采集；全部可用缺口处理结束后只发布一次网页。
+不指定日期时，程序先取网页与SQLite共同确认的最后成功发布日期，再通过iFinD上证指数实际交易日期列出此后全部交易日，按日期升序逐日补至最新上一个完整交易日，不以周一至周五简单代替交易日历。法定休市日自动跳过；若某日失败，任务停止在该日，已成功日期仍保留并发布，下次运行从该日继续。
 
-每个待补交易日只执行一轮iFinD所有权采集，按5只ETF一批取得基金份额、基金规模和直接净流入；收盘价和成交额并发查询腾讯明确目标日的历史行情，只有缺失代码才串行调用东方财富目标日日K线。不得用腾讯最新报价替代历史目标日。回补只填空值，不覆盖已成功观测。低于95%完整度时保留旧网页并在下次运行重试；同一日期连续三次独立运行仍失败时写入 `runtime/backfill_failures.json` 并隔离，网页披露源端缺口但继续更新后续日期。
+每个交易日只执行一轮iFinD所有权采集，按5只ETF一批取得基金份额、基金规模和直接净流入，并写入 `data/raw/ifind` 的增量结果文件；收盘价和成交额由轻量日K线接口补充。相同日期重跑时，iFinD采集器跳过已有成功结果，只重试未成功批次。`runtime/missing_sessions_plan.json` 记录本次缺口计划，`runtime/update_status.json` 记录批次总数、已完成数量和当前日期。
 
-正式更新入口在缺口检查前运行ETF名单维护。首次运行从 `config/etf_universe.csv` 复制出用户本地的 `data/etf_universe.csv`；后续采集只读取本地名单，代码升级不得覆盖。维护每7天最多执行一次：高置信度新ETF自动启用，低置信度新ETF标为 `needs_review` 且不采集；已有ETF连续3次成功周检缺失才停用，重新出现时恢复。运行结果见 `runtime/etf_universe_maintenance.json`，历史事件见 `runtime/etf_universe_maintenance_history.jsonl`，日志见 `logs/etf_universe_YYYYMMDD.log`。公开源失败或返回规模异常时保留旧名单并继续每日任务。
+默认每日更新到同步校验通过即结束，只运行网页必需的数据采集、入库和JSON构建。量化研究清洗层和开发回归测试不属于每日链路。消息通知默认关闭；只有用户明确选择并配置自己的通知渠道后，agent才可启用 `notifications_enabled` 和通知扩展。通知必须位于网页同步校验之后，失败不得把已准确发布的网页标记为失败。
 
 仅在诊断单个日期且用户明确指定时使用 `-TargetDate YYYY-MM-DD`；自动补缺不需要手工逐日运行。程序拒绝未来日期和当日日期。
 
@@ -68,7 +69,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 更新代码前备份用户数据库和本地配置。代码升级不得覆盖：
 
 - `data/etf_catcher.sqlite3`
-- `data/etf_universe.csv`
 - `config/app.local.json`
 - `config/secrets.local.dpapi`
 
