@@ -50,7 +50,7 @@ def test_single_server_entry_and_public_baseline() -> None:
     assert sorted(path.name for path in (ROOT / "backend").glob("server*.py")) == ["server.py"]
     baseline = json.loads((ROOT / "config" / "production_baseline.json").read_text(encoding="utf-8"))
     assert baseline["server_entry"] == "backend/server.py"
-    assert baseline["baseline_id"] == "etf-catcher-public-1.0.5"
+    assert baseline["baseline_id"] == "etf-catcher-public-1.0.6"
 
 
 def test_local_skill_and_schedule_floor() -> None:
@@ -61,6 +61,16 @@ def test_local_skill_and_schedule_floor() -> None:
     configure = (ROOT / "configure.ps1").read_text(encoding="utf-8")
     assert "cannot be earlier than 08:30" in register
     assert "cannot be earlier than 08:30" in configure
+
+
+def test_agent_schedule_contract_requires_absolute_public_entry() -> None:
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    operations = (ROOT / "references" / "operations.md").read_text(encoding="utf-8")
+    register = (ROOT / "scripts" / "register_tasks.ps1").read_text(encoding="utf-8")
+    assert "absolute path" in skill
+    assert "完整绝对路径" in operations
+    assert "Join-Path $Root 'update.ps1'" in register
+    assert "-WorkingDirectory $Root" in register
 
 
 def test_user_universe_is_local_and_daily_update_runs_weekly_maintenance() -> None:

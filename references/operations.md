@@ -37,7 +37,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 .\start.ps1
 ```
 
-网页默认地址读取 `config/production_baseline.json`。安装器和配置器不会自行创建Windows定时任务；用户要求自动运行时，由其agent按用户选定时间建立，且必须在08:30或之后。网页更新口径始终是最新上一个完整交易日。
+网页默认地址读取 `config/production_baseline.json`。安装器和配置器不会自行创建Windows定时任务；用户要求自动运行时，由其agent按用户选定时间建立，且必须在08:30或之后。任务动作或Codex自动化提示必须保存当前Skill根目录下 `update.ps1` 的完整绝对路径，并把Skill根目录设为工作目录；禁止使用相对入口、已删除的旧版脚本或 `scripts/` 下的内部单项脚本。建立后必须读回实际配置并核验入口。网页更新口径始终是最新上一个完整交易日。
 
 ## 手动更新与恢复
 

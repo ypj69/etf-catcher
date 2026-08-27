@@ -42,7 +42,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 .\configure.ps1 -DailyTime "09:15"
 ```
 
-任何早于08:30的时间都会被拒绝。公开版安装和配置不会自动创建Windows定时任务；由用户自己的agent按用户要求建立每日运行安排。DeepSeek密钥在交互提示中录入，并使用当前Windows用户的DPAPI加密；不会写入JSON、日志或Git。
+任何早于08:30的时间都会被拒绝。公开版安装和配置不会自动创建Windows定时任务；由用户自己的agent按用户要求建立每日运行安排。agent保存任务时必须写入当前安装目录下 `update.ps1` 的完整绝对路径，并将当前安装目录设为工作目录；不能只保存相对路径、旧版入口或内部下游脚本。创建后应重新读取任务配置，核对绝对入口无误。DeepSeek密钥在交互提示中录入，并使用当前Windows用户的DPAPI加密；不会写入JSON、日志或Git。
 
 如暂不使用DeepSeek：
 
