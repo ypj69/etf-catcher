@@ -37,6 +37,7 @@ def main() -> None:
             {
                 "job_id": f"ownership_{offset:04d}_{args.date}",
                 "codes": [row["etf_code"] for row in batch],
+                "ths_codes": [f"{row['etf_code']}.{row['exchange']}" for row in batch],
                 "start_date": args.date,
                 "end_date": args.date,
                 "query": query,

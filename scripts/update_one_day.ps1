@@ -45,7 +45,7 @@ try{
     $OwnershipResults=Join-Path $Root "data\raw\ifind\results_ownership_$RunId.jsonl"
     & $Python (Join-Path $PSScriptRoot 'prepare_ifind_direct_flow_jobs.py') --date $TargetDate --output $OwnershipJobs *>>$Log
     Assert-Step 'prepare ownership jobs'
-    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $OwnershipJobs --output $OwnershipResults --tool get_fund_ownership --concurrency 1 --attempts 5 *>>$Log
+    & $Python (Join-Path $PSScriptRoot 'collect_ifind_with_fallback.py') --jobs $OwnershipJobs --output $OwnershipResults --concurrency 1 --attempts 5 *>>$Log
     Assert-Step 'ownership collection'
     & $Python (Join-Path $PSScriptRoot 'deduplicate_ifind_results.py') --input $OwnershipResults *>>$Log
     Assert-Step 'deduplicate ownership results'

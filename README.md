@@ -54,6 +54,40 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 
 ## 使用
 
+### 可选：MCP额度耗尽后自动切换原生Python API
+
+每日ETF采集默认先使用iFinD MCP。若明确返回“用户使用工具已超限”“额度已用完”“额度不足”或对应额度耗尽错误，程序会自动切换到用户自己的 **iFinD原生Python数据接口（iFinDPy / THS_BD）**，继续未完成的批次。已成功批次会跳过，日期仍固定为待更新交易日。
+
+这不是Skill里的 `call.py`（它仍然调用MCP）。原生接口需要用户另行具备有效的数据接口账号、指标权限及可用额度；MCP套餐不代表原生接口权益。切换不是绕过额度限制，Python接口也可能因账号权限、额度或数据未发布而失败。
+
+**目前覆盖范围只有ETF基金份额、基金规模、直接净流入额三个字段。** 宏观数据、指数MCP兜底、网页详情及DeepSeek按需查询不包含在此切换中。普通网络超时、429频率限制、未登录等错误不会触发Python切换；两条通道均不可用时会报错保留既有数据，不会填0冒充更新成功。未配置原生接口不影响MCP正常采集，但额度耗尽时会提示先配置。
+
+配置步骤（只需一次）：
+
+1. 先运行 `setup.ps1` 建立项目 `.venv`，并安装、配置自己的iFinD MCP Skill。
+2. 按[同花顺官方Windows SDK部署说明](https://quantapi.51ifind.com/gwstatic/static/ds_web/quantapi-web/help-center/deploy.html)安装官方SDK。使用超级命令“环境设置”时，选择本项目 `.venv\Scripts\python.exe`，不要只配置全局Python。本仓库不附带商业SDK或共享账户。
+3. 仅验证SDK能导入（不会登录取数）：
+
+   ```powershell
+   .\.venv\Scripts\python.exe -c "from iFinDPy import THS_BD, THS_iFinDLogin, THS_iFinDLogout; print('SDK import OK')"
+   ```
+
+   如果官方SDK没有注册到虚拟环境，也可在运行更新的进程中设置 `IFIND_SDK_DIR` 为包含 `iFinDPy.py` 的官方安装目录；依赖DLL仍需按官方说明正确部署。
+4. 在项目目录执行独立配置向导，输入你自己的**数据接口账号和密码**，不是MCP密钥：
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\configure-ifind.ps1
+   ```
+
+   密码隐藏输入，账号密码整体使用当前Windows用户的DPAPI加密保存到 `config/ifind-native.local.dpapi`，不会写入明文JSON或Git。此向导不登录、不查询、不创建定时任务，也不改动DeepSeek配置。程序解密只在内存中使用；不要把密码发给agent或写进命令历史。
+5. 正常执行 `update.ps1` 即可，无需更换每日任务入口。后台任务必须使用完成配置的同一个Windows用户；换电脑或换Windows用户后需重新运行配置向导。
+
+高级用法：可以由你自己的安全凭据管理器向更新进程同时注入 `IFIND_API_USERNAME` 和 `IFIND_API_PASSWORD`，环境变量优先于DPAPI。只设置其中一个会报错，不会混用两套账户。若需要停用此兜底，移除本机 `config/ifind-native.local.dpapi` 并清除这两个环境变量即可。代码升级不会覆盖该加密文件。
+
+诊断记录：`runtime/ifind_collection_route_status.json` 显示实际通道（`ifind_mcp` / `ifind_python_api`）、是否切换、退出码和原因，不包含凭据。SDK缺失、登录失败、原生额度不足时，检查官方SDK环境及账号权益后重新运行 `update.ps1`；结果文件保留成功批次，可继续采集。不同日仍会先尝试MCP，不会永久锁定Python通道。此功能不改变08:30之后更新上一完整交易日的要求，通知仍默认关闭。
+
+### 启动和更新
+
 ```powershell
 .\start.ps1
 .\update.ps1
@@ -78,7 +112,7 @@ agent可以通过受控只读工具解读本地数据：
 
 ## 隐私与安全
 
-- `config/secrets.local.dpapi`、`config/app.local.json`、本地SQLite、网页缓存、日志和运行状态均被Git忽略。
+- `config/secrets.local.dpapi`、`config/ifind-native.local.dpapi`、`config/app.local.json`、本地SQLite、网页缓存、日志和运行状态均被Git忽略。
 - 后端只使用当前Windows用户的DeepSeek密钥与iFinD Skill，不提供共享账户。
 - 健康接口只返回配置状态和数据日期，不返回凭据内容。
 
