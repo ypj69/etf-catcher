@@ -15,6 +15,7 @@ import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from ai_data_queries import CORE_ETFS, core_request, encode_context, flow_ranking, flow_summary, query_dates, ranking_request
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,18 +88,30 @@ def local_research_context(body: dict, question: str) -> tuple[str, dict]:
     if not DATABASE.exists():
         raise FileNotFoundError("本地种子数据库尚未安装")
     window = research_window(question)
-    explicit = [str(body.get("etf_code", ""))] if CODE_RE.fullmatch(str(body.get("etf_code", ""))) else []
+    explicit = [str(body.get("etf_code", ""))] if CODE_RE.fullmatch(str(body.get("etf_code", ""))) and re.search(r"这只|当前ETF|该ETF|当前基金", question) else []
     codes = list(dict.fromkeys(ANY_CODE_RE.findall(question) + explicit))[:4]
+    ranking = ranking_request(question)
+    is_core = core_request(question)
+    if is_core:
+        codes = list(CORE_ETFS)
+    elif ranking:
+        codes = []
     sections: list[dict] = []
     coverage = {"database": "data/etf_catcher.sqlite3", "window": window, "etfs": [], "groups": [], "indices": []}
     with sqlite3.connect(f"file:{DATABASE.as_posix()}?mode=ro", uri=True, timeout=8) as connection:
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        published = (load_json(WEB_DATA / "meta.json", {}) or {}).get("flow_latest")
+        start, end, bounds = query_dates(connection, question, window, published)
+        coverage["date_range"] = bounds
+        coverage["query_version"] = "20260923"
+        sections.append({"type": "查询范围与口径", **bounds, "note": "区间包含首尾交易日，缺失不填零。单只ETF不得使用全市场数值代替。金额字段为元，net_flow_yi为亿元。"})
         masters = [dict(row) for row in connection.execute(
             "SELECT etf_code,etf_name,exchange,asset_class,category_l1,category_l2,tracking_index_code,tracking_index_name "
             "FROM etf_master WHERE enabled=1"
         )]
         for row in masters:
-            if row.get("etf_name") and row["etf_name"] in question and row["etf_code"] not in codes:
+            if not ranking and not is_core and row.get("etf_name") and row["etf_name"] in question and row["etf_code"] not in codes:
                 codes.append(row["etf_code"])
             if len(codes) >= 4:
                 break
@@ -109,14 +122,27 @@ def local_research_context(body: dict, question: str) -> tuple[str, dict]:
                 continue
             rows = [dict(row) for row in connection.execute(
                 "SELECT trade_date,close,pct_change,fund_share,fund_scale,net_flow,amount,flow_source,data_status "
-                "FROM etf_daily WHERE etf_code=? ORDER BY trade_date DESC LIMIT ?", (code, window)
+                "FROM etf_daily WHERE etf_code=? AND trade_date BETWEEN ? AND ? ORDER BY trade_date DESC", (code, start, end)
             )][::-1]
-            sections.append({"type": "ETF历史", "meta": meta, "rows": rows})
+            summary = flow_summary(connection, code, start, end, bounds["trading_days"])
+            sections.append({"type": "ETF历史", "meta": meta, "rows": rows, "summary": summary})
             coverage["etfs"].append({"code": code, "name": meta["etf_name"], "start": rows[0]["trade_date"] if rows else None, "end": rows[-1]["trade_date"] if rows else None, "rows": len(rows)})
+        if ranking:
+            rank = flow_ranking(connection, start, end, bounds["trading_days"], *ranking)
+            sections.append(rank)
+            coverage["ranking"] = {k: v for k, v in rank.items() if k != "rows"}
+            coverage["ranking"]["returned_rows"] = len(rank["rows"])
+        if is_core:
+            summaries = [flow_summary(connection, code, start, end, bounds["trading_days"]) for code in CORE_ETFS]
+            totals = [row["net_flow"] for row in summaries if row["net_flow"] is not None]
+            sections.append({"type": "四只核心沪深300ETF区间合计", "codes": list(CORE_ETFS),
+                "net_flow": sum(totals) if totals else None, "by_etf": dict(zip(CORE_ETFS, summaries)),
+                "complete": all(row["complete"] for row in summaries),
+                "note": "仅为稳定资金行为代理，不等同国家队实际买卖；不完整时合计只包含已知部分。"})
         overall = [dict(row) for row in connection.execute(
             "SELECT trade_date,SUM(net_flow) AS net_flow,SUM(amount) AS amount,COUNT(*) AS etf_rows "
-            "FROM etf_daily WHERE trade_date IN (SELECT DISTINCT trade_date FROM etf_daily ORDER BY trade_date DESC LIMIT ?) "
-            "GROUP BY trade_date ORDER BY trade_date", (window,)
+            "FROM etf_daily WHERE trade_date BETWEEN ? AND ? "
+            "GROUP BY trade_date ORDER BY trade_date", (start, end)
         )]
         sections.append({"type": "全市场ETF历史", "rows": overall})
         table_names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -124,12 +150,12 @@ def local_research_context(body: dict, question: str) -> tuple[str, dict]:
             names = [row[0] for row in connection.execute("SELECT DISTINCT group_name FROM panel_group_daily")]
             for name in matched_groups(question, names):
                 rows = [dict(row) for row in connection.execute(
-                    "SELECT * FROM panel_group_daily WHERE group_name=? ORDER BY trade_date DESC LIMIT ?", (name, window)
+                    "SELECT * FROM panel_group_daily WHERE group_name=? AND trade_date BETWEEN ? AND ? ORDER BY trade_date DESC", (name, start, end)
                 )][::-1]
                 sections.append({"type": "分类历史（与网页面板一致）", "name": name, "rows": rows})
                 coverage["groups"].append({"name": name, "start": rows[0]["trade_date"] if rows else None, "end": rows[-1]["trade_date"] if rows else None, "rows": len(rows)})
-        if "index_daily" in table_names:
-            dates = [row[0] for row in connection.execute("SELECT DISTINCT date FROM index_daily ORDER BY date DESC LIMIT ?", (window,))]
+        if "index_daily" in table_names and re.search(r"全球|海外|美股|美国|日韩|指数|标普|纳指|上证|市场情绪", question):
+            dates = [row[0] for row in connection.execute("SELECT DISTINCT date FROM index_daily WHERE date BETWEEN ? AND ? ORDER BY date DESC", (start, end))]
             if dates:
                 placeholders = ",".join("?" for _ in dates)
                 indices = [dict(row) for row in connection.execute(
@@ -137,14 +163,19 @@ def local_research_context(body: dict, question: str) -> tuple[str, dict]:
                 )]
                 sections.append({"type": "全球指数历史", "rows": indices})
                 coverage["indices"] = sorted({row["index_code"] for row in indices})
-        if "macro_payload" in table_names:
+        if "macro_payload" in table_names and re.search(r"宏观|PMI|社融|货币|存款|信贷|利率|美债|美元|汇率|成交额|融资|流动性", question, re.I):
             row = connection.execute("SELECT payload_json FROM macro_payload WHERE id=1").fetchone()
             if row:
                 macro = json.loads(row[0])
+                for tab in macro.get("tabs", {}).values():
+                    for series in tab.get("series", []):
+                        points = series.get("points", [])
+                        if bounds["explicit_dates"]:
+                            points = [point for point in points if start <= str(point.get("date")) <= end]
+                        series["points"] = points[-min(60, window):]
                 sections.append({"type": "宏观监控", "data": macro})
                 coverage["macro_as_of"] = macro.get("target_date")
-    encoded = json.dumps(sections, ensure_ascii=False, separators=(",", ":"))
-    return encoded[:100_000], coverage
+    return encode_context(sections, coverage), coverage
 
 
 def ifind_skill_ready() -> bool:

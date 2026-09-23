@@ -6,6 +6,10 @@ param(
   [switch]$CollectOnly
 )
 $ErrorActionPreference='Stop'
+$env:PYTHONUTF8='1'
+$env:PYTHONIOENCODING='utf-8'
+[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
+$OutputEncoding=[Console]::OutputEncoding
 $Root=Split-Path -Parent $PSScriptRoot
 $Runtime=Join-Path $Root 'runtime'
 $Logs=Join-Path $Root 'logs'
@@ -41,7 +45,7 @@ try{
     $OwnershipResults=Join-Path $Root "data\raw\ifind\results_ownership_$RunId.jsonl"
     & $Python (Join-Path $PSScriptRoot 'prepare_ifind_direct_flow_jobs.py') --date $TargetDate --output $OwnershipJobs *>>$Log
     Assert-Step 'prepare ownership jobs'
-    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $OwnershipJobs --output $OwnershipResults --tool get_fund_ownership --concurrency 2 *>>$Log
+    node (Join-Path $PSScriptRoot 'collect_ifind_incremental.js') --jobs $OwnershipJobs --output $OwnershipResults --tool get_fund_ownership --concurrency 1 --attempts 5 *>>$Log
     Assert-Step 'ownership collection'
     & $Python (Join-Path $PSScriptRoot 'deduplicate_ifind_results.py') --input $OwnershipResults *>>$Log
     Assert-Step 'deduplicate ownership results'

@@ -23,6 +23,7 @@ def make_fixture(tmp_path: Path) -> Path:
     (tmp_path / "data" / "web").mkdir(parents=True)
     (tmp_path / "runtime").mkdir()
     shutil.copy2(ROOT / "scripts" / "update_public.ps1", scripts / "update_public.ps1")
+    (scripts / 'ensure_macro_cache.py').write_text("from pathlib import Path\nPath(__file__).parents[1].joinpath('runtime','macro_checked.txt').write_text('checked')\n", encoding='utf-8')
     (scripts / "plan_missing_sessions.py").write_text(
         "import json\nprint(json.dumps({'status':'pending','published_through':'2026-08-19',"
         "'window_start':'2026-08-20','target_date':'2026-08-24','publication_required':True,"
@@ -126,6 +127,7 @@ def test_no_gap_sessions_is_a_successful_noop(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     runtime = tmp_path / "runtime"
     assert not (runtime / "calls.txt").exists()
+    assert (runtime / "macro_checked.txt").exists()
     assert not (runtime / "published.txt").exists()
     status = json.loads((runtime / "update_status.json").read_text(encoding="utf-8-sig"))
     assert status["status"] == "pass"
