@@ -117,6 +117,7 @@ def extract_records(input_path: Path, target_date: str) -> tuple[dict[str, dict[
                 "fund_scale": parse_number(find_value(row, (FIELD_SCALE,)), units.get(FIELD_SCALE)),
                 "direct_net_flow": parse_number(raw_flow, units.get(FIELD_FLOW)),
                 "raw_flow": str(raw_flow or ""),
+                "source": "iFinD_Python_API_THS_BD" if job.get("provider") == "iFinD_Python_API" else "iFinD_get_fund_ownership",
             }
             if any(item[name] is not None for name in ("fund_share", "fund_scale", "direct_net_flow")):
                 records[code] = item
@@ -150,14 +151,16 @@ def ingest(database: Path, target_date: str, records: dict[str, dict[str, object
                     """INSERT INTO etf_direct_flow_observations(
                            trade_date,etf_code,direct_net_flow,raw_value,source_unit,source,
                            source_field,available_at)
-                       VALUES(?,?,?,?,?,'iFinD_get_fund_ownership','净流入额',?)
+                       VALUES(?,?,?,?,?,?,'净流入额',?)
                        ON CONFLICT(trade_date,etf_code) DO UPDATE SET
                            direct_net_flow=COALESCE(etf_direct_flow_observations.direct_net_flow,excluded.direct_net_flow),
                            raw_value=CASE WHEN etf_direct_flow_observations.direct_net_flow IS NULL
                                           THEN excluded.raw_value ELSE etf_direct_flow_observations.raw_value END,
+                           source=CASE WHEN etf_direct_flow_observations.direct_net_flow IS NULL
+                                       THEN excluded.source ELSE etf_direct_flow_observations.source END,
                            available_at=CASE WHEN etf_direct_flow_observations.direct_net_flow IS NULL
                                             THEN excluded.available_at ELSE etf_direct_flow_observations.available_at END""",
-                    (target_date, code, direct, item["raw_flow"], "元", now),
+                    (target_date, code, direct, item["raw_flow"], "元", item.get("source", "iFinD_get_fund_ownership"), now),
                 )
             connection.execute(
                 """INSERT INTO etf_daily(

@@ -1,6 +1,9 @@
 .venv/
 config/app.local.json
 config/secrets.local.dpapi
+config/ifind-native.local.dpapi
+config/ifind_api_credentials.local.json
+vendor/
 data/*.sqlite3
 data/*.sqlite3-*
 data/etf_universe.csv

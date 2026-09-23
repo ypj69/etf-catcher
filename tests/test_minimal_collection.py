@@ -60,7 +60,7 @@ def test_ownership_parser_handles_compound_scale_units(tmp_path: Path) -> None:
 def test_daily_orchestration_uses_one_ifind_etf_collection() -> None:
     path = ROOT / "scripts" / ("update_one_day.ps1" if (ROOT / "scripts" / "update_one_day.ps1").is_file() else "update_production.ps1")
     text = path.read_text(encoding="utf-8")
-    assert text.count("collect_ifind_incremental.js") == 1
+    assert text.count("collect_ifind_with_fallback.py") == 1
     assert "ingest_market_minimal.py" in text
     assert "jobs_ownership_" in text
     assert "prepare_ifind_jobs_t1.py" not in text

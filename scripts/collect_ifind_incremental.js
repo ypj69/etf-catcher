@@ -36,7 +36,7 @@ function isRateLimited(answer) {
 }
 
 function isQuotaExhausted(answer) {
-  return /(?:用户使用工具已超限|额度已用完|quota exhausted)/i.test(String(answer || ''));
+  return /(?:用户使用工具已超限|额度已用完|额度不足|额度.*耗尽|quota exhausted|insufficient quota|IFIND_QUOTA_EXHAUSTED)/i.test(String(answer || ''));
 }
 
 async function main() {
@@ -73,6 +73,11 @@ async function main() {
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
           const result = await call('fund', tool, { query: job.query });
+          if (isQuotaExhausted(JSON.stringify(result))) {
+            const error = new Error('IFIND_QUOTA_EXHAUSTED');
+            error.code = 'IFIND_QUOTA_EXHAUSTED';
+            throw error;
+          }
           const answer = answerOf(result);
           const status = hasTableRows(answer) ? 'success' : 'empty';
           record = { ...job, tool, attempt, answer, result, started_at: startedAt, finished_at: new Date().toISOString(), status };
@@ -94,6 +99,7 @@ async function main() {
         }
       }
       fs.appendFileSync(output, JSON.stringify(record) + '\n', 'utf8');
+      if (record.status !== 'success') throw new Error(`IFIND_JOB_FAILED: ${job.job_id}`);
       done += 1;
       if (done % 10 === 0 || done === jobs.length) console.log(JSON.stringify({ worker: workerId, done, total: jobs.length }));
       await wait(500);
