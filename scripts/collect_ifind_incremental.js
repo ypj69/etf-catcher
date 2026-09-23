@@ -27,12 +27,24 @@ function answerOf(result) {
   }).join('\n');
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimited(answer) {
+  return /(?:status:\s*429|请求过于频繁|稍后重试)/i.test(String(answer || ''));
+}
+
+function isQuotaExhausted(answer) {
+  return /(?:用户使用工具已超限|额度已用完|quota exhausted)/i.test(String(answer || ''));
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (!args.jobs || !args.output) throw new Error('Required: --jobs and --output');
   const concurrency = Math.max(1, Math.min(2, Number(args.concurrency || 2)));
   const tool = args.tool || 'get_fund_market_performance';
-  const maxAttempts = Math.max(1, Math.min(5, Number(args.attempts || 3)));
+  const maxAttempts = Math.max(1, Math.min(5, Number(args.attempts || 5)));
   const skillDir = process.env.IFIND_SKILL_DIR || path.join(os.homedir(), '.codex', 'skills', 'ifind-finance-data');
   const { call } = require(path.join(skillDir, 'call-node.js'));
   const jobs = JSON.parse(fs.readFileSync(path.resolve(args.jobs), 'utf8'));
@@ -65,13 +77,26 @@ async function main() {
           const status = hasTableRows(answer) ? 'success' : 'empty';
           record = { ...job, tool, attempt, answer, result, started_at: startedAt, finished_at: new Date().toISOString(), status };
           if (status === 'success') break;
+          if (isQuotaExhausted(answer)) {
+            const error = new Error(`iFinD quota exhausted while processing ${job.job_id}: ${answer.slice(0, 300)}`);
+            error.code = 'IFIND_QUOTA_EXHAUSTED';
+            throw error;
+          }
+          if (isRateLimited(answer) && attempt < maxAttempts) {
+            const delayMs = Math.min(60000, 5000 * (2 ** (attempt - 1)));
+            console.error(JSON.stringify({ worker: workerId, job_id: job.job_id, rate_limited: true, retry_in_seconds: delayMs / 1000 }));
+            await wait(delayMs);
+          }
         } catch (error) {
+          if (error?.code === 'IFIND_QUOTA_EXHAUSTED' || isQuotaExhausted(error?.message || error)) throw error;
           record = { ...job, tool, attempt, error: String(error?.stack || error), started_at: startedAt, finished_at: new Date().toISOString(), status: 'error' };
+          if (attempt < maxAttempts) await wait(Math.min(30000, 3000 * (2 ** (attempt - 1))));
         }
       }
       fs.appendFileSync(output, JSON.stringify(record) + '\n', 'utf8');
       done += 1;
       if (done % 10 === 0 || done === jobs.length) console.log(JSON.stringify({ worker: workerId, done, total: jobs.length }));
+      await wait(500);
     }
   }
   await Promise.all(Array.from({ length: concurrency }, (_, i) => worker(i + 1)));

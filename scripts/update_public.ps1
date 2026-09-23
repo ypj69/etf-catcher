@@ -5,6 +5,10 @@ param(
   [switch]$Resume
 )
 $ErrorActionPreference='Stop'
+$env:PYTHONUTF8='1'
+$env:PYTHONIOENCODING='utf-8'
+[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
+$OutputEncoding=[Console]::OutputEncoding
 $Root=Split-Path -Parent $PSScriptRoot
 $Runtime=Join-Path $Root 'runtime'
 $Logs=Join-Path $Root 'logs'
@@ -62,6 +66,8 @@ try{
     $PublishableDates=@($Plan.ready_dates)
     if(-not $Plan.publication_required){
       $CurrentDate=[string]$Plan.published_through
+      & $Python (Join-Path $PSScriptRoot 'ensure_macro_cache.py') --date $CurrentDate --database $Database
+      if($LASTEXITCODE-ne 0){throw 'macro cache validation or repair failed'}
       Write-BatchStatus 'pass' 'complete' 'no sessions exist after the last successful web publication'
       return
     }

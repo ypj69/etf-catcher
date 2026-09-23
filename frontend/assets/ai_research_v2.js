@@ -28,12 +28,18 @@
       const response=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,etf_code:state.selectedEtf,online:online.checked})});
       const data=await response.json();if(response.ok)answer.innerHTML=renderMarkdown(data.answer);else answer.textContent=data.error;
       if(response.ok){
-        const local=data.sources?.[0]?.coverage||{},parts=[`本地库：${local.window||60}个交易日`];
+        const local=data.sources?.[0]?.coverage||{},range=local.date_range||{},parts=[range.start?`本地查询：${range.start}—${range.end}（${range.trading_days}个交易日）`:'本地查询：所问区间无记录'];
+        if(range.explicit_dates)parts.push(`指定区间 ${range.requested_start}—${range.requested_end}`);
+        if(range.unavailable_after)parts.push(`已发布数据截至 ${range.published_latest}`);
         if(local.macro_as_of)parts.push(`宏观数据截至 ${local.macro_as_of}`);
         if(local.etfs?.length)parts.push(`ETF ${local.etfs.map(x=>`${x.code}（${x.start}—${x.end}）`).join('、')}`);
         if(local.index_start)parts.push(`全球指数 ${local.index_start}—${local.index_end}`);
+        if(local.ranking)parts.push(`${local.ranking.type}：${local.ranking.returned_rows}只，完整样本${local.ranking.eligible_etfs}只，排除缺失${local.ranking.excluded_incomplete_etfs}只`);
+        if(local.stable_fund)parts.push('资金雷达：四只核心沪深300ETF（稳定资金行为代理）');
+        if(local.omitted_series?.length)parts.push('部分历史明细因容量限制省略，区间合计仍按完整数据计算');
+        const safeParts=parts.map(escapeHtml);
         const web=(data.sources||[]).slice(1).map(item=>{const label=[item.title||item.name,item.published_at?`发布 ${item.published_at}`:'',item.retrieved_at?`检索 ${item.retrieved_at}`:''].filter(Boolean).join(' · ');return item.url?`<a href="${esc(item.url)}" target="_blank" rel="noreferrer">${esc(label)}</a>`:esc(label)});
-        if(web.length)parts.push(`联网来源：${web.join('、')}`);if(data.warning)parts.push(esc(data.warning));source.innerHTML=parts.join('｜');
+        if(web.length)safeParts.push(`联网来源：${web.join('、')}`);if(data.warning)safeParts.push(escapeHtml(data.warning));source.innerHTML=safeParts.join('｜');
       }else source.textContent='未完成数据检索';
     }catch(error){answer.textContent=`请求失败：${error}`;source.textContent='本地服务连接失败'}finally{button.disabled=false}
   };

@@ -1,5 +1,9 @@
 param([string]$TargetDate='',[switch]$Resume)
 $ErrorActionPreference='Stop'
+$env:PYTHONUTF8='1'
+$env:PYTHONIOENCODING='utf-8'
+[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
+$OutputEncoding=[Console]::OutputEncoding
 $Root=Split-Path -Parent $MyInvocation.MyCommand.Path
 $Python=Join-Path $Root '.venv\Scripts\python.exe'
 $Database=Join-Path $Root 'data\etf_catcher.sqlite3'

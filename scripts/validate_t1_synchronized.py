@@ -6,12 +6,17 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+from macro_freshness import evaluate_macro_freshness
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORTED_FLOW_SOURCES = {"estimated_share_change", "iFinD_get_fund_ownership"}
 OVERSEAS_INDEX_CODES = {"GSPC", "IXIC", "N225", "KS11"}
 MAX_OVERSEAS_CARRY_DAYS = 7
+
+
+def embedded_freshness_matches(macro: dict, computed: dict) -> bool:
+    return isinstance(macro.get("freshness"), dict) and macro["freshness"] == computed
 
 
 def coverage_minimum(rows: int, ratio: float = 0.95) -> int:
@@ -86,6 +91,7 @@ def main() -> None:
     overseas_valid, index_latest_by_series, overseas_carry_forward = validate_overseas_index_dates(
         indices, pd.Timestamp(args.date)
     )
+    macro_freshness = evaluate_macro_freshness(macro, args.date)
     market_minimum = coverage_minimum(market_rows)
     flow_minimum = coverage_minimum(total)
     checks = {
@@ -102,6 +108,8 @@ def main() -> None:
         "meta_flow_synced": meta.get("flow_latest") == args.date,
         "group_database_synced": group_db_latest == args.date,
         "group_web_synced": bool(groups) and max(str(item.get("trade_date") or "") for item in groups) == args.date,
+        "macro_key_series_fresh": macro_freshness["status"] == "pass",
+        "macro_embedded_freshness_synced": embedded_freshness_matches(macro, macro_freshness),
         "macro_target_synced": macro.get("target_date") == args.date,
         "macro_tabs_complete": set(macro.get("tabs") or {}) == {"retail_flow", "credit_pmi", "overseas"},
         "processed_etf_cutoff": str(pd.read_parquet(ROOT / "data" / "processed" / "etf_daily.parquet")["trade_date"].max().date()) == args.date,
@@ -122,6 +130,7 @@ def main() -> None:
         "resolution_rows": resolution_rows,
         "group_database_latest": group_db_latest,
         "group_web_latest": max((str(item.get("trade_date") or "") for item in groups), default=None),
+        "macro_freshness": macro_freshness,
         "macro_target_date": macro.get("target_date"),
         "share_changed": changed,
         "invalid_scale_rows": invalid_scale,
